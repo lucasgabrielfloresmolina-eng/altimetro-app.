@@ -1,0 +1,22 @@
+{
+  "name": "Altímetro · Altitud en tiempo real",
+  "short_name": "Altímetro",
+  "description": "Rastrea tu altitud sobre el nivel del mar en tiempo real, combinando GPS y modelo de terreno SRTM.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0D1B26",
+  "theme_color": "#0D1B26",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

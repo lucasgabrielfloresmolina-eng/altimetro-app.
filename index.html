@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Altímetro · Altitud en tiempo real</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0D1B26">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.3/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root{
+    --ink:#0D1B26;
+    --panel:#152838;
+    --panel-2:#1C3347;
+    --contour:#3E6E64;
+    --amber:#E8A33D;
+    --amber-dim:#8A6229;
+    --parchment:#EDE6D6;
+    --fog:#7C93A0;
+    --danger:#C1543A;
+    --ok:#5FA88A;
+    --hair:rgba(237,230,214,0.10);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--parchment);
+    font-family:'Space Grotesk',sans-serif;
+    min-height:100vh;
+    overflow-x:hidden;
+  }
+  .mono{font-family:'JetBrains Mono',monospace;}
+
+  /* ---------- contour backdrop ---------- */
+  .contour-bg{
+    position:fixed; inset:0; z-index:0; opacity:0.35; pointer-events:none;
+  }
+
+  .wrap{
+    position:relative; z-index:1;
+    max-width:720px; margin:0 auto;
+    padding:22px 18px 60px;
+  }
+
+  header{
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:6px;
+  }
+  .eyebrow{
+    font-size:11px; letter-spacing:0.18em; text-transform:uppercase;
+    color:var(--fog); font-family:'JetBrains Mono',monospace;
+  }
+  h1{
+    font-size:20px; margin:2px 0 0; font-weight:600; letter-spacing:0.01em;
+  }
+  .status-pill{
+    font-family:'JetBrains Mono',monospace; font-size:11px;
+    padding:5px 10px; border-radius:20px; border:1px solid var(--hair);
+    display:flex; align-items:center; gap:6px; white-space:nowrap;
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--fog);}
+  .dot.live{background:var(--ok); box-shadow:0 0 8px var(--ok); animation:pulse 1.8s infinite;}
+  .dot.err{background:var(--danger);}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+
+  /* ---------- altimeter dial ---------- */
+  .instrument{
+    margin:26px auto 10px; width:min(320px, 78vw); aspect-ratio:1;
+    position:relative;
+  }
+  .instrument svg{width:100%;height:100%;display:block;}
+  .needle{
+    transform-origin:160px 160px;
+    transition:transform 0.6s cubic-bezier(.4,0,.2,1);
+  }
+  .readout{
+    position:absolute; left:50%; top:64%; transform:translate(-50%,-50%);
+    text-align:center;
+  }
+  .readout .num{
+    font-family:'JetBrains Mono',monospace; font-size:40px; font-weight:600;
+    color:var(--amber); letter-spacing:-0.02em; line-height:1;
+    text-shadow:0 0 18px rgba(232,163,61,0.35);
+  }
+  .readout .unit{
+    font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--fog);
+    letter-spacing:0.1em; margin-top:2px;
+  }
+
+  .compare-row{
+    display:flex; gap:10px; margin-top:22px;
+  }
+  .compare-card{
+    flex:1; background:var(--panel); border:1px solid var(--hair);
+    border-radius:10px; padding:12px 14px;
+  }
+  .compare-card .label{
+    font-size:10px; text-transform:uppercase; letter-spacing:0.12em;
+    color:var(--fog); font-family:'JetBrains Mono',monospace;
+  }
+  .compare-card .val{
+    font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:600;
+    margin-top:4px; color:var(--parchment);
+  }
+  .compare-card .sub{
+    font-size:11px; color:var(--fog); margin-top:3px; font-family:'JetBrains Mono',monospace;
+  }
+  .compare-card.gps .val{color:#7FB7E8;}
+  .compare-card.api .val{color:var(--contour); }
+  .compare-card.api{border-color:rgba(62,110,100,0.4);}
+  .compare-card.gps{border-color:rgba(127,183,232,0.3);}
+
+  section.block{
+    margin-top:30px;
+  }
+  .block h2{
+    font-size:13px; text-transform:uppercase; letter-spacing:0.14em;
+    color:var(--fog); font-weight:600; margin:0 0 12px;
+    font-family:'JetBrains Mono',monospace;
+    display:flex; align-items:center; gap:8px;
+  }
+  .block h2::before{
+    content:''; width:14px; height:1px; background:var(--amber-dim);
+  }
+
+  .chart-panel{
+    background:var(--panel); border:1px solid var(--hair); border-radius:12px;
+    padding:14px; height:220px;
+  }
+
+  #map{
+    height:260px; border-radius:12px; overflow:hidden; border:1px solid var(--hair);
+    filter:saturate(0.75) brightness(0.9);
+  }
+
+  .stats-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:10px;
+  }
+  .stat{
+    background:var(--panel); border:1px solid var(--hair); border-radius:10px;
+    padding:12px 14px;
+  }
+  .stat .label{
+    font-size:10px; text-transform:uppercase; letter-spacing:0.1em;
+    color:var(--fog); font-family:'JetBrains Mono',monospace;
+  }
+  .stat .val{
+    font-family:'JetBrains Mono',monospace; font-size:19px; font-weight:600;
+    margin-top:5px;
+  }
+  .stat.ascent .val.up{color:var(--ok);}
+  .stat.ascent .val.down{color:var(--danger);}
+
+  .permission-card{
+    background:var(--panel); border:1px solid var(--hair); border-radius:12px;
+    padding:20px; text-align:center; margin-top:20px;
+  }
+  .permission-card p{color:var(--fog); font-size:13px; line-height:1.5; margin:8px 0 16px;}
+  button.cta{
+    background:var(--amber); color:#1a1207; border:none; border-radius:8px;
+    padding:11px 22px; font-family:'Space Grotesk',sans-serif; font-weight:600;
+    font-size:14px; cursor:pointer;
+  }
+  button.cta:active{transform:scale(0.98);}
+
+  footer{
+    margin-top:34px; font-size:11px; color:var(--fog);
+    font-family:'JetBrains Mono',monospace; text-align:center; line-height:1.6;
+  }
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+
+<svg class="contour-bg" viewBox="0 0 800 1400" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3E6E64" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#3E6E64" stop-opacity="0.05"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#fade)" stroke-width="1.2">
+    <path d="M0,120 C150,60 300,180 450,110 C600,40 700,140 800,90"/>
+    <path d="M0,220 C150,160 300,280 450,210 C600,140 700,240 800,190"/>
+    <path d="M0,320 C150,260 300,380 450,310 C600,240 700,340 800,290"/>
+    <path d="M0,420 C150,360 300,480 450,410 C600,340 700,440 800,390"/>
+    <path d="M0,520 C150,460 300,580 450,510 C600,440 700,540 800,490"/>
+    <path d="M0,620 C150,560 300,680 450,610 C600,540 700,640 800,590"/>
+    <path d="M0,760 C150,700 300,820 450,750 C600,680 700,780 800,730"/>
+    <path d="M0,900 C150,840 300,960 450,890 C600,820 700,920 800,870"/>
+    <path d="M0,1040 C150,980 300,1100 450,1030 C600,960 700,1060 800,1010"/>
+    <path d="M0,1180 C150,1120 300,1240 450,1170 C600,1100 700,1200 800,1150"/>
+  </g>
+</svg>
+
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="eyebrow">Estación de altitud</div>
+      <h1>¿A qué altura estás?</h1>
+    </div>
+    <div class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">Inactivo</span></div>
+  </header>
+
+  <div class="instrument" id="instrument">
+    <svg viewBox="0 0 320 320">
+      <circle cx="160" cy="160" r="150" fill="var(--panel)" stroke="var(--hair)" stroke-width="2"/>
+      <circle cx="160" cy="160" r="130" fill="none" stroke="rgba(237,230,214,0.06)" stroke-width="1"/>
+      <g id="ticks" stroke="var(--fog)" stroke-width="2"></g>
+      <g id="ticklabels" fill="var(--fog)" font-family="JetBrains Mono, monospace" font-size="11"></g>
+      <!-- needle -->
+      <g class="needle" id="needle">
+        <polygon points="160,50 165,165 155,165" fill="var(--amber)"/>
+        <circle cx="160" cy="160" r="8" fill="var(--amber)"/>
+      </g>
+    </svg>
+    <div class="readout">
+      <div class="num mono" id="mainAlt">--</div>
+      <div class="unit">METROS S.N.M. · ESTIMADO</div>
+    </div>
+  </div>
+
+  <div class="compare-row">
+    <div class="compare-card gps">
+      <div class="label">GPS del dispositivo</div>
+      <div class="val mono" id="gpsAlt">-- m</div>
+      <div class="sub" id="gpsAcc">precisión: --</div>
+    </div>
+    <div class="compare-card api">
+      <div class="label">Modelo de terreno (SRTM)</div>
+      <div class="val mono" id="apiAlt">-- m</div>
+      <div class="sub" id="apiSrc">fuente: --</div>
+    </div>
+  </div>
+
+  <div class="permission-card" id="permCard">
+    <p>Para rastrear tu altitud en vivo necesito acceso a tu ubicación. Funciona mejor al aire libre, con buena señal GPS.</p>
+    <button class="cta" id="startBtn">Activar altímetro</button>
+  </div>
+
+  <div id="app" class="hidden">
+    <section class="block">
+      <h2>Altitud en el tiempo</h2>
+      <div class="chart-panel"><canvas id="altChart"></canvas></div>
+    </section>
+
+    <section class="block">
+      <h2>Tu ruta</h2>
+      <div id="map"></div>
+    </section>
+
+    <section class="block">
+      <h2>Estadísticas</h2>
+      <div class="stats-grid">
+        <div class="stat"><div class="label">Máxima</div><div class="val" id="statMax">-- m</div></div>
+        <div class="stat"><div class="label">Mínima</div><div class="val" id="statMin">-- m</div></div>
+        <div class="stat ascent"><div class="label">Vel. de ascenso</div><div class="val" id="statRate">-- m/min</div></div>
+        <div class="stat"><div class="label">Distancia recorrida</div><div class="val" id="statDist">-- m</div></div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    Open-Topo-Data (SRTM 90m) &amp; Open-Elevation como respaldo · Geolocation API<br>
+    Instalable como app · Los datos no salen de tu navegador
+  </footer>
+</div>
+
+<script>
+(function(){
+  const R2D = 180/Math.PI;
+  const dial = { min:-200, max:6500 }; // rango del dial ajustado a sierra/costa peruana
+
+  // ---------- construir dial (ticks) ----------
+  const ticksG = document.getElementById('ticks');
+  const labelsG = document.getElementById('ticklabels');
+  const cx=160, cy=160, rOuter=150, rInner=136, rLabel=112;
+  const startDeg=-210, endDeg=30; // barrido de 240°
+  const steps=12;
+  for(let i=0;i<=steps;i++){
+    const t=i/steps;
+    const deg=startDeg+(endDeg-startDeg)*t;
+    const rad=deg*Math.PI/180;
+    const x1=cx+rOuter*Math.cos(rad), y1=cy+rOuter*Math.sin(rad);
+    const x2=cx+rInner*Math.cos(rad), y2=cy+rInner*Math.sin(rad);
+    const tick=document.createElementNS('http://www.w3.org/2000/svg','line');
+    tick.setAttribute('x1',x1);tick.setAttribute('y1',y1);
+    tick.setAttribute('x2',x2);tick.setAttribute('y2',y2);
+    ticksG.appendChild(tick);
+    if(i%3===0){
+      const val=Math.round(dial.min+(dial.max-dial.min)*t);
+      const xl=cx+rLabel*Math.cos(rad), yl=cy+rLabel*Math.sin(rad);
+      const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
+      txt.setAttribute('x',xl);txt.setAttribute('y',yl);
+      txt.setAttribute('text-anchor','middle');
+      txt.textContent=(val/1000).toFixed(1)+'k';
+      labelsG.appendChild(txt);
+    }
+  }
+
+  function altToDeg(alt){
+    const clamped=Math.max(dial.min, Math.min(dial.max, alt));
+    const t=(clamped-dial.min)/(dial.max-dial.min);
+    return startDeg+(endDeg-startDeg)*t + 90; // +90 porque la aguja apunta hacia arriba en reposo
+  }
+
+  const needle=document.getElementById('needle');
+  function setNeedle(alt){
+    const deg=altToDeg(alt);
+    needle.style.transform=`rotate(${deg}deg)`;
+  }
+
+  // ---------- estado ----------
+  let watchId=null;
+  let lastApiCallCoord=null;
+  let history=[]; // {t, gps, api, combined, lat, lon}
+  let map, poly, marker;
+  let chart;
+  const MIN_MOVE_FOR_API_M = 25; // sólo re-consultar API si te moviste esto o más
+  const MIN_TIME_FOR_API_MS = 8000;
+  let lastApiCallTime = 0;
+
+  const statusDot=document.getElementById('statusDot');
+  const statusText=document.getElementById('statusText');
+  function setStatus(mode, text){
+    statusDot.className='dot'+(mode==='live'?' live':mode==='err'?' err':'');
+    statusText.textContent=text;
+  }
+
+  function haversine(lat1,lon1,lat2,lon2){
+    const toRad=d=>d*Math.PI/180;
+    const R=6371000;
+    const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+    const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return 2*R*Math.asin(Math.sqrt(a));
+  }
+
+  // ---------- API de elevación ----------
+  async function fetchElevation(lat, lon){
+    try{
+      const r = await fetch(`https://api.opentopodata.org/v1/srtm90m?locations=${lat},${lon}`);
+      const j = await r.json();
+      if(j && j.results && j.results[0] && j.results[0].elevation!=null){
+        return {value:j.results[0].elevation, source:'SRTM 90m'};
+      }
+      throw new Error('sin datos');
+    }catch(e){
+      try{
+        const r2 = await fetch(`https://api.open-elevation.com/api/v1/lookup?locations=${lat},${lon}`);
+        const j2 = await r2.json();
+        if(j2 && j2.results && j2.results[0]){
+          return {value:j2.results[0].elevation, source:'Open-Elevation'};
+        }
+      }catch(e2){ /* silencio, se maneja arriba */ }
+      return null;
+    }
+  }
+
+  // ---------- gráfico ----------
+  function initChart(){
+    const ctx=document.getElementById('altChart').getContext('2d');
+    chart = new Chart(ctx, {
+      type:'line',
+      data:{
+        labels:[],
+        datasets:[
+          {label:'GPS', data:[], borderColor:'#7FB7E8', borderWidth:2, pointRadius:0, tension:0.35},
+          {label:'Terreno (API)', data:[], borderColor:'#3E6E64', borderWidth:2, pointRadius:0, tension:0.35},
+        ]
+      },
+      options:{
+        animation:false, responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index', intersect:false},
+        plugins:{ legend:{ labels:{ color:'#7C93A0', font:{family:'JetBrains Mono', size:10} } } },
+        scales:{
+          x:{ ticks:{ color:'#7C93A0', maxTicksLimit:6, font:{family:'JetBrains Mono', size:9} }, grid:{ color:'rgba(237,230,214,0.05)' } },
+          y:{ ticks:{ color:'#7C93A0', font:{family:'JetBrains Mono', size:9} }, grid:{ color:'rgba(237,230,214,0.05)' } }
+        }
+      }
+    });
+  }
+
+  function initMap(lat, lon){
+    map = L.map('map', {zoomControl:false, attributionControl:false}).setView([lat,lon], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    poly = L.polyline([], {color:'#E8A33D', weight:3}).addTo(map);
+    marker = L.circleMarker([lat,lon], {radius:6, color:'#E8A33D', fillColor:'#E8A33D', fillOpacity:1}).addTo(map);
+  }
+
+  // ---------- estadísticas ----------
+  function updateStats(){
+    if(history.length===0) return;
+    const combinedVals = history.map(h=>h.combined).filter(v=>v!=null);
+    if(combinedVals.length){
+      document.getElementById('statMax').textContent = Math.round(Math.max(...combinedVals))+' m';
+      document.getElementById('statMin').textContent = Math.round(Math.min(...combinedVals))+' m';
+    }
+    // tasa de ascenso: comparar contra un punto ~30s atrás
+    const now = history[history.length-1];
+    const past = history.slice().reverse().find(h => now.t - h.t >= 30000) || history[0];
+    if(past && now.combined!=null && past.combined!=null && now.t!==past.t){
+      const rateMin = (now.combined - past.combined) / ((now.t-past.t)/60000);
+      const el = document.getElementById('statRate');
+      el.textContent = (rateMin>=0?'+':'') + rateMin.toFixed(1) + ' m/min';
+      el.className = 'val ' + (rateMin>0.5?'up':rateMin<-0.5?'down':'');
+    }
+    // distancia total
+    let dist=0;
+    for(let i=1;i<history.length;i++){
+      dist += haversine(history[i-1].lat, history[i-1].lon, history[i].lat, history[i].lon);
+    }
+    document.getElementById('statDist').textContent = dist<1000 ? Math.round(dist)+' m' : (dist/1000).toFixed(2)+' km';
+  }
+
+  // ---------- manejo de posición ----------
+  async function onPosition(pos){
+    const {latitude:lat, longitude:lon, altitude:gpsAlt, altitudeAccuracy} = pos.coords;
+    const t = pos.timestamp;
+
+    setStatus('live','En vivo');
+
+    document.getElementById('gpsAlt').textContent = (gpsAlt!=null? Math.round(gpsAlt) : '—') + ' m';
+    document.getElementById('gpsAcc').textContent = altitudeAccuracy!=null ? `precisión: ±${Math.round(altitudeAccuracy)} m` : 'precisión: no disponible';
+
+    if(!map) initMap(lat, lon);
+    else { map.panTo([lat,lon]); }
+    poly.addLatLng([lat,lon]);
+    marker.setLatLng([lat,lon]);
+
+    let shouldCallApi = false;
+    if(!lastApiCallCoord){ shouldCallApi = true; }
+    else {
+      const moved = haversine(lastApiCallCoord.lat, lastApiCallCoord.lon, lat, lon);
+      if(moved >= MIN_MOVE_FOR_API_M && (Date.now()-lastApiCallTime) >= MIN_TIME_FOR_API_MS) shouldCallApi = true;
+    }
+
+    let apiResult = history.length ? {value: history[history.length-1].api, source:null} : null;
+    if(shouldCallApi){
+      lastApiCallCoord = {lat, lon};
+      lastApiCallTime = Date.now();
+      document.getElementById('apiSrc').textContent = 'fuente: consultando…';
+      const r = await fetchElevation(lat, lon);
+      if(r){
+        apiResult = {value:r.value, source:r.source};
+        document.getElementById('apiAlt').textContent = Math.round(r.value)+' m';
+        document.getElementById('apiSrc').textContent = 'fuente: '+r.source;
+      } else {
+        document.getElementById('apiSrc').textContent = 'fuente: no disponible';
+      }
+    }
+
+    const apiVal = apiResult ? apiResult.value : null;
+    let combined;
+    if(gpsAlt!=null && apiVal!=null) combined = (gpsAlt*0.4 + apiVal*0.6);
+    else combined = gpsAlt!=null ? gpsAlt : apiVal;
+
+    document.getElementById('mainAlt').textContent = combined!=null ? Math.round(combined) : '--';
+    if(combined!=null) setNeedle(combined);
+
+    history.push({t, lat, lon, gps:gpsAlt, api:apiVal, combined});
+    if(history.length>500) history.shift();
+
+    const label = new Date(t).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(gpsAlt);
+    chart.data.datasets[1].data.push(apiVal);
+    if(chart.data.labels.length>60){
+      chart.data.labels.shift();
+      chart.data.datasets[0].data.shift();
+      chart.data.datasets[1].data.shift();
+    }
+    chart.update('none');
+
+    updateStats();
+  }
+
+  function onError(err){
+    setStatus('err','Error de ubicación');
+    console.error(err);
+  }
+
+  document.getElementById('startBtn').addEventListener('click', function(){
+    if(!navigator.geolocation){
+      setStatus('err','GPS no disponible en este navegador');
+      return;
+    }
+    document.getElementById('permCard').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    initChart();
+    setStatus('','Buscando señal…');
+    watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+      enableHighAccuracy:true, maximumAge:2000, timeout:20000
+    });
+  });
+
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('sw.js').catch(function(){ /* opcional, requiere hosting propio */ });
+    });
+  }
+})();
+</script>
+</body>
+</html>
